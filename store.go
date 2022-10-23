@@ -19,8 +19,6 @@ const (
 )
 
 var (
-	// ErrDBNotStarted represents the error when a db has not started
-	ErrDBNotStarted = errors.New("db has not started")
 	// ErrNotFound is returned when the key supplied to a Get or Delete
 	// method does not exist in the database.
 	ErrNotFound = errors.New("key not found")
@@ -100,9 +98,10 @@ func Open(DbPath string, opts ...Option) (*Store, error) {
 	}
 
 	return &Store{
-		db:  db,
-		opt: &opt,
-		lru: lru,
+		db:    db,
+		opt:   &opt,
+		lru:   lru,
+		group: singleflight.Group{},
 	}, nil
 }
 
@@ -183,12 +182,7 @@ func (s *Store) Load(key string, obj any) error {
 	}
 	if s.lru != nil {
 		if v, ok := s.lru.Get(key); ok {
-			value := reflect.ValueOf(obj)
-			if value.Kind() != reflect.Ptr {
-				return errors.New("obj must be a pointer")
-			}
-			value.Elem().Set(reflect.ValueOf(v))
-			return nil
+			return assign(obj, v)
 		}
 	}
 	buf, err := s.Get(_defaultBucket, []byte(key))
@@ -218,7 +212,6 @@ func (s *Store) Memoize(key string, obj any, f func() (any, error)) error {
 		}
 
 		value, err, _ := s.group.Do(key, func() (any, error) {
-
 			data, innerErr := f()
 			if innerErr != nil {
 				return nil, innerErr
@@ -231,11 +224,9 @@ func (s *Store) Memoize(key string, obj any, f func() (any, error)) error {
 		if err != nil {
 			return err
 		}
-		target := reflect.ValueOf(obj)
-		if target.Kind() != reflect.Ptr {
-			return errors.New("obj must be a pointer")
+		if err := assign(obj, value); err != nil {
+			return err
 		}
-		target.Elem().Set(reflect.ValueOf(value))
 	}
 	return nil
 }
@@ -245,4 +236,16 @@ func (s *Store) tryAddToLRU(key string, value any) {
 		return
 	}
 	s.lru.Add(key, value)
+}
+
+func assign(dst, src any) error {
+	if src == nil {
+		return ErrBadValue
+	}
+	value := reflect.ValueOf(dst)
+	if value.Kind() != reflect.Ptr {
+		return errors.New("dst must be a pointer")
+	}
+	value.Elem().Set(reflect.ValueOf(src))
+	return nil
 }
