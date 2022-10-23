@@ -1,6 +1,5 @@
 
-[![Test status](https://github.com/millken/gostore/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/millken/gostore/actions?workflow=test)
-[![Coverage Status](https://coveralls.io/repos/github/millken/gostore/badge.svg?branch=main)](https://coveralls.io/github/millken/gostore?branch=main)
+[![Test status](https://github.com/millken/gostore/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/millken/gostore/actions?workflow=test)
 [![Go Report Card](https://goreportcard.com/badge/github.com/millken/gostore)](https://goreportcard.com/report/github.com/millken/gostore)
 [![GoDev](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white)](https://pkg.go.dev/github.com/millken/gostore)
 [![GitHub release](https://img.shields.io/github/release/millken/gostore.svg)](https://github.com/millken/gostore/releases)
