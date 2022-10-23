@@ -224,9 +224,7 @@ func (s *Store) Memoize(key string, obj any, f func() (any, error)) error {
 		if err != nil {
 			return err
 		}
-		if err := assign(obj, value); err != nil {
-			return err
-		}
+		return assign(obj, value)
 	}
 	return nil
 }

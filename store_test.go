@@ -196,11 +196,15 @@ func TestMemoize(t *testing.T) {
 		t.Errorf("expected value %s, got %s", "test", v.Name)
 	}
 	// second call should load from cache
-	if err := s.Memoize("test", &v, func() (any, error) {
+	v2 := &struct{ Name string }{}
+	if err := s.Memoize("test", v2, func() (any, error) {
 		t.Log("loading from cache")
 		return nil, errors.New("should not be called")
 	}); err != nil {
 		t.Error(err)
+	}
+	if v2.Name != v.Name {
+		t.Errorf("expected value %s, got %s", "test", v.Name)
 	}
 }
 
