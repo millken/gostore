@@ -171,24 +171,27 @@ func TestUpdateLoadRemoveNotFound(t *testing.T) {
 	}
 }
 
+type T1 struct {
+	Name string
+}
+
 func TestMemoize(t *testing.T) {
 	path, err := tempfile()
 	if err != nil {
 		t.Error(err)
 	}
 	defer os.RemoveAll(path)
-	s, err := Open(path, WithMaxCacheSize(1))
+	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 
-	var v struct{ Name string }
-	// first call should load from db
-	if err := s.Memoize("test", &v, func() (any, error) {
-		value := struct{ Name string }{Name: "test"}
+	v := &T1{}
+	if err := s.Memoize("test", v, func() (any, error) {
 		t.Log("loading from db")
-		return value, nil
+		v1 := &T1{Name: "test"}
+		return v1, nil
 	}); err != nil {
 		t.Error(err)
 	}
@@ -196,7 +199,7 @@ func TestMemoize(t *testing.T) {
 		t.Errorf("expected value %s, got %s", "test", v.Name)
 	}
 	// second call should load from cache
-	v2 := &struct{ Name string }{}
+	v2 := &T1{}
 	if err := s.Memoize("test", v2, func() (any, error) {
 		t.Log("loading from cache")
 		return nil, errors.New("should not be called")
@@ -220,7 +223,7 @@ func BenchmarkStoreWithCache(b *testing.B) {
 	}
 	defer s.Close()
 
-	value := struct{ Name string }{Name: "test"}
+	value := &T1{Name: "test"}
 
 	b.Run("Update", func(b *testing.B) {
 		b.ReportAllocs()
@@ -236,7 +239,7 @@ func BenchmarkStoreWithCache(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			var v struct{ Name string }
+			var v T1
 			if err := s.Load("test", &v); err != nil {
 				b.Error(err)
 			}

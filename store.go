@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"golang.org/x/sync/singleflight"
 
@@ -234,16 +233,4 @@ func (s *Store) tryAddToLRU(key string, value any) {
 		return
 	}
 	s.lru.Add(key, value)
-}
-
-func assign(dst, src any) error {
-	if src == nil {
-		return ErrBadValue
-	}
-	value := reflect.ValueOf(dst)
-	if value.Kind() != reflect.Ptr {
-		return errors.New("dst must be a pointer")
-	}
-	value.Elem().Set(reflect.ValueOf(src))
-	return nil
 }
