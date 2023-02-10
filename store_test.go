@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestOpen(t *testing.T) {
@@ -64,7 +65,7 @@ func TestFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	value, err := s.Get("test", []byte("key"))
+	value, err := s.Get([]byte("test"), []byte("key"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -85,9 +86,9 @@ func TestFetchNotFound(t *testing.T) {
 	}
 	defer s.Close()
 
-	_, err = s.Get("test", []byte("key"))
-	if err != ErrNotFound {
-		t.Errorf("expected error %s, got %s", ErrNotFound, err)
+	_, err = s.Get([]byte("test"), []byte("key"))
+	if err != ErrKeyNotFound {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
 }
 
@@ -111,10 +112,31 @@ func TestDelete(t *testing.T) {
 		t.Error(err)
 	}
 
-	_, err = s.Get("test", []byte("key"))
-	if err != ErrNotFound {
-		t.Errorf("expected error %s, got %s", ErrNotFound, err)
+	_, err = s.Get([]byte("test"), []byte("key"))
+	if err != ErrKeyNotFound {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
+}
+
+func TestDeleteNamespace(t *testing.T) {
+	path, err := tempfile()
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(path)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Put("test", []byte("a"), []byte("aa")); err != nil {
+		t.Error(err)
+	}
+	if err := s.DeleteNamespace("test"); err != nil {
+		t.Error(err)
+	}
+	s.Close()
+
 }
 
 func TestUpdateLoadRemove(t *testing.T) {
@@ -145,8 +167,8 @@ func TestUpdateLoadRemove(t *testing.T) {
 	if err := s.Remove("test"); err != nil {
 		t.Error(err)
 	}
-	if err := s.Load("test", &v); err != ErrNotFound {
-		t.Errorf("expected error %s, got %s", ErrNotFound, err)
+	if err := s.Load("test", &v); err != ErrKeyNotFound {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
 }
 
@@ -163,11 +185,11 @@ func TestUpdateLoadRemoveNotFound(t *testing.T) {
 	defer s.Close()
 
 	var v struct{ Name string }
-	if err := s.Load("test", &v); !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected error %s, got %s", ErrNotFound, err)
+	if err := s.Load("test", &v); !errors.Is(err, ErrKeyNotFound) {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
 	if err := s.Remove("test"); err != nil {
-		t.Errorf("expected error %s, got %s", ErrNotFound, err)
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
 }
 
@@ -209,6 +231,53 @@ func TestMemoize(t *testing.T) {
 	if v2.Name != v.Name {
 		t.Errorf("expected value %s, got %s", "test", v.Name)
 	}
+}
+
+func TestMemoizeWithTTL(t *testing.T) {
+	path, err := tempfile()
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(path)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	v := &T1{}
+	if err := s.MemoizeWithTTL("test", v, func() (any, error) {
+		t.Log("loading from db")
+		v1 := &T1{Name: "test"}
+		return v1, nil
+	}, 2); err != nil {
+		t.Error(err)
+	}
+	if v.Name != "test" {
+		t.Errorf("expected value %s, got %s", "test", v.Name)
+	}
+	// second call should load from cache
+	v2 := &T1{}
+	if err := s.MemoizeWithTTL("test", v2, func() (any, error) {
+		t.Log("loading from cache")
+		return nil, errors.New("should not be called")
+	}, 2); err != nil {
+		t.Error(err)
+	}
+	if v2.Name != v.Name {
+		t.Errorf("expected value %s, got %s", "test", v.Name)
+	}
+	// wait for ttl to expire
+	time.Sleep(3 * time.Second)
+	// third call should load from db
+	v3 := &T1{}
+	if err := s.MemoizeWithTTL("test", v3, func() (any, error) {
+		v1 := &T1{Name: "test"}
+		return v1, nil
+	}, 2); err != ErrKeyExpired {
+		t.Errorf("expected error %s, got %s", ErrKeyExpired, err)
+	}
+
 }
 
 func BenchmarkStoreWithCache(b *testing.B) {

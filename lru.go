@@ -1,6 +1,9 @@
 package gostore
 
-import "container/list"
+import (
+	"container/list"
+	"time"
+)
 
 type lru struct {
 	evictList *list.List
@@ -10,8 +13,9 @@ type lru struct {
 
 // entry is used to hold a value in the evictList
 type entry struct {
-	key   string
-	value any
+	key    string
+	expire time.Time
+	value  any
 }
 
 func newLRU(size int) *lru {
@@ -23,7 +27,7 @@ func newLRU(size int) *lru {
 }
 
 // Add adds a value to the cache.
-func (l *lru) Add(key string, value any) {
+func (l *lru) Add(key string, expire time.Time, value any) {
 	// Check for existing item
 	if ent, ok := l.items[key]; ok {
 		l.evictList.MoveToFront(ent)
@@ -32,7 +36,7 @@ func (l *lru) Add(key string, value any) {
 	}
 
 	// Add new item
-	ent := &entry{key, value}
+	ent := &entry{key, expire, value}
 	entry := l.evictList.PushFront(ent)
 	l.items[key] = entry
 
@@ -44,15 +48,18 @@ func (l *lru) Add(key string, value any) {
 }
 
 // Get looks up a key's value from the cache.
-func (l *lru) Get(key string) (obj any, ok bool) {
+func (l *lru) Get(key string) (any, bool) {
 	if ent, ok := l.items[key]; ok {
 		l.evictList.MoveToFront(ent)
 		if ent.Value.(*entry) == nil {
 			return nil, false
 		}
-		return ent.Value.(*entry).value, true
+		if ent.Value.(*entry).expire.IsZero() || ent.Value.(*entry).expire.After(time.Now()) {
+			return ent.Value.(*entry).value, true
+		}
+		l.removeElement(ent)
 	}
-	return
+	return nil, false
 }
 
 //Delete deletes a key from the cache.
