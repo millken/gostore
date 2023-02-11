@@ -20,8 +20,6 @@ const (
 )
 
 var (
-	// ErrBucketNotFound is returned when the bucket supplied to a GetBucket
-	ErrBucketNotFound = errors.New("bucket not found")
 	// ErrKeyNotFound is returned when the key supplied to a Get or Delete
 	// method does not exist in the database.
 	ErrKeyNotFound = errors.New("key not found")
@@ -173,7 +171,7 @@ func (s *Store) get(namespace, key []byte) (valueT, error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(namespace)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return ErrKeyNotFound
 		}
 		val := bucket.Get(key)
 		if val == nil {
@@ -279,7 +277,7 @@ func (s *Store) Memoize(key string, obj any, f func() (any, error)) error {
 
 func (s *Store) MemoizeWithTTL(key string, obj any, f func() (any, error), ttl int64) error {
 	if err := s.Load(key, obj); err != nil {
-		if err != ErrKeyNotFound {
+		if err != ErrKeyNotFound && err != ErrKeyExpired {
 			return err
 		}
 

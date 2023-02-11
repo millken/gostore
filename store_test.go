@@ -189,7 +189,7 @@ func TestUpdateLoadRemoveNotFound(t *testing.T) {
 		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
 	if err := s.Remove("test"); err != nil {
-		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
+		t.Error(err)
 	}
 }
 
@@ -274,8 +274,8 @@ func TestMemoizeWithTTL(t *testing.T) {
 	if err := s.MemoizeWithTTL("test", v3, func() (any, error) {
 		v1 := &T1{Name: "test"}
 		return v1, nil
-	}, 2); err != ErrKeyExpired {
-		t.Errorf("expected error %s, got %s", ErrKeyExpired, err)
+	}, 2); err != nil {
+		t.Error(err)
 	}
 
 }
