@@ -1,6 +1,7 @@
 package gostore
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -71,6 +72,33 @@ func TestFetch(t *testing.T) {
 	}
 	if string(value) != "value" {
 		t.Errorf("expected value %s, got %s", "value", value)
+	}
+}
+
+func TestOptionWithMaxCacheSize(t *testing.T) {
+	path, err := tempfile()
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(path)
+	s, err := Open(path, WithMaxCacheSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var v T1
+	if err := s.Load("test", &v); err != ErrKeyNotFound {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
+	}
+	if err := s.Update("test", &T1{Name: "value"}); err != nil {
+		t.Error(err)
+	}
+	err = s.Load("test", &v)
+	if err != nil {
+		t.Error(err)
+	}
+	if v.Name != "value" {
+		t.Errorf("expected value %s, got %s", "value", v.Name)
 	}
 }
 
@@ -150,14 +178,14 @@ func TestUpdateLoadRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	value := struct{ Name string }{Name: "test"}
+	value := &T1{Name: "test"}
 	if err := s.Update("test", value); err != nil {
 		t.Error(err)
 	}
 	s.Close()
 
 	s, _ = Open(path, WithMaxCacheSize(1))
-	var v struct{ Name string }
+	var v T1
 	if err := s.Load("test", &v); err != nil {
 		t.Error(err)
 	}
@@ -184,7 +212,7 @@ func TestUpdateLoadRemoveNotFound(t *testing.T) {
 	}
 	defer s.Close()
 
-	var v struct{ Name string }
+	var v T1
 	if err := s.Load("test", &v); !errors.Is(err, ErrKeyNotFound) {
 		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
 	}
@@ -194,7 +222,16 @@ func TestUpdateLoadRemoveNotFound(t *testing.T) {
 }
 
 type T1 struct {
-	Name string
+	Name string `json:"name"`
+	Uid  int    `json:"uid"`
+}
+
+func (t T1) MarshalBinary() ([]byte, error) {
+	return json.Marshal(t)
+}
+
+func (t *T1) UnmarshalBinary(data []byte) error {
+	return json.Unmarshal(data, t)
 }
 
 func TestMemoize(t *testing.T) {

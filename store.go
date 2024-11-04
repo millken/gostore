@@ -2,7 +2,8 @@ package gostore
 
 import (
 	"bytes"
-	"encoding/gob"
+	"encoding"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -44,6 +45,49 @@ type option struct {
 type valueT struct {
 	Value  []byte
 	Expire time.Time
+}
+
+func (v *valueT) isExpired() bool {
+	return !v.Expire.IsZero() && time.Now().After(v.Expire)
+}
+
+func (v valueT) MarshalBinary() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	if err := binary.Write(buf, binary.LittleEndian, int32(len(v.Value))); err != nil {
+		return nil, err
+	}
+	if _, err := buf.Write(v.Value); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(buf, binary.LittleEndian, v.Expire.Unix()); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (v *valueT) UnmarshalBinary(data []byte) error {
+	buf := bytes.NewReader(data)
+
+	var length int32
+	if err := binary.Read(buf, binary.LittleEndian, &length); err != nil {
+		return err
+	}
+	v.Value = make([]byte, length)
+	if _, err := buf.Read(v.Value); err != nil {
+		return err
+	}
+
+	// 读取 Expire 时间戳
+	var expire int64
+	if err := binary.Read(buf, binary.LittleEndian, &expire); err != nil {
+		return err
+	}
+	v.Expire = time.Unix(expire, 0)
+
+	return nil
 }
 
 // WithNumRetries defines service name
@@ -132,13 +176,13 @@ func (s *Store) PutWithTTL(namespace, key, value []byte, ttl int64) (err error) 
 			if err != nil {
 				return err
 			}
-			newvalue := bytesToValue(value, ttl)
-			var buf bytes.Buffer
-			if err := gob.NewEncoder(&buf).Encode(newvalue); err != nil {
+			newvalue := newValueT(value, ttl)
+			buf, err := newvalue.MarshalBinary()
+			if err != nil {
 				return err
 			}
 
-			return bucket.Put(key, buf.Bytes())
+			return bucket.Put(key, buf)
 		}); err == nil {
 			break
 		}
@@ -165,8 +209,8 @@ func (s *Store) Get(namespace, key []byte) ([]byte, error) {
 	return valT.Value, err
 }
 
-func (s *Store) get(namespace, key []byte) (valueT, error) {
-	var value valueT
+func (s *Store) get(namespace, key []byte) (*valueT, error) {
+	var value = &valueT{}
 	var err error
 	err = s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(namespace)
@@ -178,9 +222,7 @@ func (s *Store) get(namespace, key []byte) (valueT, error) {
 			return ErrKeyNotFound
 		}
 
-		if err := gob.NewDecoder(bytes.NewReader(val)).Decode(&value); err != nil {
-			return err
-		}
+		err = value.UnmarshalBinary(val)
 		return nil
 	})
 	return value, err
@@ -197,29 +239,29 @@ func (s *Store) Delete(namespace string, key []byte) error {
 	})
 }
 
-// Update set value by key, value must be gob-encodable
-func (s *Store) Update(key string, value any) error {
+// Update set value by key, value must be implement encoding.BinaryMarshaler
+func (s *Store) Update(key string, value encoding.BinaryMarshaler) error {
 	return s.UpdateWithTTL(key, value, 0)
 }
 
-// UpdateWithTTL set value by key with TTL, value must be gob-encodable
-func (s *Store) UpdateWithTTL(key string, value any, ttl int64) error {
+// UpdateWithTTL set value by key with TTL, value must be implement encoding.BinaryMarshaler
+func (s *Store) UpdateWithTTL(key string, value encoding.BinaryMarshaler, ttl int64) error {
 	if value == nil {
 		return ErrBadValue
 	}
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(value); err != nil {
+	buf, err := value.MarshalBinary()
+	if err != nil {
 		return err
 	}
-	if err := s.PutWithTTL([]byte(_defaultBucket), []byte(key), buf.Bytes(), ttl); err != nil {
+	if err := s.PutWithTTL([]byte(_defaultBucket), []byte(key), buf, ttl); err != nil {
 		return err
 	}
-	s.tryAddToLRU(key, value, ttl)
+	s.tryAddToLRU(key, buf, ttl)
 	return nil
 }
 
-func bytesToValue(value []byte, ttl int64) valueT {
-	newvalue := valueT{
+func newValueT(value []byte, ttl int64) *valueT {
+	newvalue := &valueT{
 		Value: value,
 	}
 	if ttl == 0 {
@@ -230,29 +272,25 @@ func bytesToValue(value []byte, ttl int64) valueT {
 	return newvalue
 }
 
-//Load read value by key
-func (s *Store) Load(key string, obj any) error {
+// Load read value by key
+func (s *Store) Load(key string, obj encoding.BinaryUnmarshaler) error {
 	if obj == nil {
 		return ErrBadValue
 	}
 	if s.lru != nil {
 		if v, ok := s.lru.Get(key); ok {
-			return assign(obj, v)
+			return obj.UnmarshalBinary(v)
 		}
 	}
+
 	valT, err := s.get([]byte(_defaultBucket), []byte(key))
 	if err != nil {
 		return err
 	}
-	now := time.Now()
-	if !valT.Expire.IsZero() && now.After(valT.Expire) {
+	if valT.isExpired() {
 		return ErrKeyExpired
 	}
-	if err := gob.NewDecoder(bytes.NewReader(valT.Value)).Decode(obj); err != nil {
-		return err
-	}
-	s.tryAddToLRU(key, obj, int64(valT.Expire.Sub(now).Seconds()))
-	return nil
+	return obj.UnmarshalBinary(valT.Value)
 }
 
 // DeleteNamespace deletes a namespace
@@ -271,35 +309,45 @@ func (s *Store) Remove(key string) error {
 }
 
 // Memoize memoize a function
-func (s *Store) Memoize(key string, obj any, f func() (any, error)) error {
+func (s *Store) Memoize(key string, obj encoding.BinaryUnmarshaler, f func() (any, error)) error {
 	return s.MemoizeWithTTL(key, obj, f, 0)
 }
 
-func (s *Store) MemoizeWithTTL(key string, obj any, f func() (any, error), ttl int64) error {
+func (s *Store) MemoizeWithTTL(key string, obj encoding.BinaryUnmarshaler, f func() (any, error), ttl int64) error {
 	if err := s.Load(key, obj); err != nil {
 		if err != ErrKeyNotFound && err != ErrKeyExpired {
 			return err
 		}
 
-		value, err, _ := s.group.Do(key, func() (any, error) {
+		_, err, _ := s.group.Do(key, func() (any, error) {
 			data, innerErr := f()
 			if innerErr != nil {
 				return nil, innerErr
 			}
-			if err := s.UpdateWithTTL(key, data, ttl); err != nil {
+			v, ok := data.(encoding.BinaryMarshaler)
+			if !ok {
+				return nil, ErrBadValue
+			}
+
+			buf, err := v.MarshalBinary()
+			if err != nil {
 				return nil, err
 			}
-			return data, nil
+			if err := s.PutWithTTL([]byte(_defaultBucket), []byte(key), buf, ttl); err != nil {
+				return nil, err
+			}
+			s.tryAddToLRU(key, buf, ttl)
+			return data, obj.UnmarshalBinary(buf)
 		})
 		if err != nil {
 			return err
 		}
-		return assign(obj, value)
+		return nil
 	}
 	return nil
 }
 
-func (s *Store) tryAddToLRU(key string, value any, ttl int64) {
+func (s *Store) tryAddToLRU(key string, value []byte, ttl int64) {
 	if s.lru == nil {
 		return
 	}

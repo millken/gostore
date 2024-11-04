@@ -15,7 +15,7 @@ type lru struct {
 type entry struct {
 	key    string
 	expire time.Time
-	value  any
+	value  []byte
 }
 
 func newLRU(size int) *lru {
@@ -27,7 +27,7 @@ func newLRU(size int) *lru {
 }
 
 // Add adds a value to the cache.
-func (l *lru) Add(key string, expire time.Time, value any) {
+func (l *lru) Add(key string, expire time.Time, value []byte) {
 	// Check for existing item
 	if ent, ok := l.items[key]; ok {
 		l.evictList.MoveToFront(ent)
@@ -48,7 +48,7 @@ func (l *lru) Add(key string, expire time.Time, value any) {
 }
 
 // Get looks up a key's value from the cache.
-func (l *lru) Get(key string) (any, bool) {
+func (l *lru) Get(key string) ([]byte, bool) {
 	if ent, ok := l.items[key]; ok {
 		l.evictList.MoveToFront(ent)
 		if ent.Value.(*entry) == nil {
@@ -62,7 +62,7 @@ func (l *lru) Get(key string) (any, bool) {
 	return nil, false
 }
 
-//Delete deletes a key from the cache.
+// Delete deletes a key from the cache.
 func (l *lru) Delete(key string) {
 	if ent, ok := l.items[key]; ok {
 		l.removeElement(ent)
