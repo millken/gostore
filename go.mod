@@ -1,12 +1,10 @@
 module github.com/millken/gostore
 
-go 1.22
-
-toolchain go1.23.0
+go 1.24
 
 require (
-	go.etcd.io/bbolt v1.3.11
-	golang.org/x/sync v0.5.0
+	go.etcd.io/bbolt v1.4.0
+	golang.org/x/sync v0.13.0
 )
 
-require golang.org/x/sys v0.4.0 // indirect
+require golang.org/x/sys v0.32.0 // indirect

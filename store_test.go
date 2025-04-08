@@ -317,6 +317,50 @@ func TestMemoizeWithTTL(t *testing.T) {
 
 }
 
+func BenchmarkStore(b *testing.B) {
+	path, err := tempfile()
+	if err != nil {
+		b.Error(err)
+	}
+	defer os.RemoveAll(path)
+	s, err := Open(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer s.Close()
+
+	value := &T1{Name: "test"}
+
+	b.Run("Update", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			if err := s.Update("test", value); err != nil {
+				b.Error(err)
+			}
+		}
+	})
+	b.Run("Load", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var v T1
+			if err := s.Load("test", &v); err != nil {
+				b.Error(err)
+			}
+		}
+	})
+	b.Run("Remove", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := s.Remove("test"); err != nil {
+				b.Error(err)
+			}
+		}
+	})
+}
 func BenchmarkStoreWithCache(b *testing.B) {
 	path, err := tempfile()
 	if err != nil {
