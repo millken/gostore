@@ -29,8 +29,11 @@ var (
 	ErrKeyExpired = errors.New("key expired")
 
 	// ErrBadValue is returned when the value supplied to the Put method
-	// is nil.
-	ErrBadValue = errors.New("bad value")
+	// is nil or when a value doesn't implement the required interface.
+	ErrBadValue = errors.New("bad value: value must implement encoding.BinaryMarshaler")
+
+	// ErrInvalidInput is returned when input parameters are invalid
+	ErrInvalidInput = errors.New("invalid input parameters")
 )
 
 // Option the tracer provider option
@@ -80,7 +83,7 @@ func (v *valueT) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	// 读取 Expire 时间戳
+	// Read Expire timestamp
 	var expire int64
 	if err := binary.Read(buf, binary.LittleEndian, &expire); err != nil {
 		return err
@@ -90,9 +93,15 @@ func (v *valueT) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// WithNumRetries defines service name
+// WithNumRetries defines the number of retry attempts for database operations
 func WithNumRetries(n uint8) Option {
 	return func(o *option) error {
+		if n == 0 {
+			return fmt.Errorf("number of retries must be greater than 0")
+		}
+		if n > 10 {
+			return fmt.Errorf("number of retries cannot exceed 10")
+		}
 		o.numRetries = n
 		return nil
 	}
@@ -101,6 +110,9 @@ func WithNumRetries(n uint8) Option {
 // WithMaxCacheSize sets the maximum number of items in the LRU cache.
 func WithMaxCacheSize(maxCacheSize int) Option {
 	return func(o *option) error {
+		if maxCacheSize < 0 {
+			return fmt.Errorf("max cache size cannot be negative")
+		}
 		o.maxCacheSize = maxCacheSize
 		return nil
 	}
@@ -165,11 +177,32 @@ func (s *Store) Close() error {
 
 // Put inserts a <key, value> record
 func (s *Store) Put(namespace string, key, value []byte) (err error) {
+	if namespace == "" {
+		return fmt.Errorf("%w: namespace cannot be empty", ErrInvalidInput)
+	}
+	if len(key) == 0 {
+		return fmt.Errorf("%w: key cannot be empty", ErrInvalidInput)
+	}
+	if value == nil {
+		return fmt.Errorf("%w: value cannot be nil", ErrInvalidInput)
+	}
 	return s.PutWithTTL([]byte(namespace), key, value, 0)
 }
 
 // PutWithTTL inserts a <key, value> record with TTL
 func (s *Store) PutWithTTL(namespace, key, value []byte, ttl int64) (err error) {
+	if len(namespace) == 0 {
+		return fmt.Errorf("%w: namespace cannot be empty", ErrInvalidInput)
+	}
+	if len(key) == 0 {
+		return fmt.Errorf("%w: key cannot be empty", ErrInvalidInput)
+	}
+	if value == nil {
+		return fmt.Errorf("%w: value cannot be nil", ErrInvalidInput)
+	}
+	if ttl < 0 {
+		return fmt.Errorf("%w: TTL cannot be negative", ErrInvalidInput)
+	}
 	for c := uint8(0); c < s.opt.numRetries; c++ {
 		if err = s.db.Update(func(tx *bolt.Tx) error {
 			bucket, err := tx.CreateBucketIfNotExists(namespace)
@@ -188,7 +221,7 @@ func (s *Store) PutWithTTL(namespace, key, value []byte, ttl int64) (err error) 
 		}
 	}
 	if err != nil {
-		err = fmt.Errorf("failed to put key %s: %w", key, err)
+		err = fmt.Errorf("failed to put key after %d retries: %w", s.opt.numRetries, err)
 	}
 
 	return err
@@ -196,6 +229,12 @@ func (s *Store) PutWithTTL(namespace, key, value []byte, ttl int64) (err error) 
 
 // Get fetches a value by key
 func (s *Store) Get(namespace, key []byte) ([]byte, error) {
+	if len(namespace) == 0 {
+		return nil, fmt.Errorf("%w: namespace cannot be empty", ErrInvalidInput)
+	}
+	if len(key) == 0 {
+		return nil, fmt.Errorf("%w: key cannot be empty", ErrInvalidInput)
+	}
 	valT, err := s.get(namespace, key)
 	if err != nil {
 		return nil, err

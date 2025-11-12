@@ -397,6 +397,72 @@ func BenchmarkStoreWithCache(b *testing.B) {
 	})
 }
 
+func TestValidationErrors(t *testing.T) {
+	path, err := tempfile()
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(path)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Test Put with empty namespace
+	if err := s.Put("", []byte("key"), []byte("value")); err == nil {
+		t.Error("expected error for empty namespace")
+	}
+
+	// Test Put with empty key
+	if err := s.Put("test", []byte{}, []byte("value")); err == nil {
+		t.Error("expected error for empty key")
+	}
+
+	// Test Put with nil value
+	if err := s.Put("test", []byte("key"), nil); err == nil {
+		t.Error("expected error for nil value")
+	}
+
+	// Test PutWithTTL with negative TTL
+	if err := s.PutWithTTL([]byte("test"), []byte("key"), []byte("value"), -1); err == nil {
+		t.Error("expected error for negative TTL")
+	}
+
+	// Test Get with empty namespace
+	if _, err := s.Get([]byte{}, []byte("key")); err == nil {
+		t.Error("expected error for empty namespace")
+	}
+
+	// Test Get with empty key
+	if _, err := s.Get([]byte("test"), []byte{}); err == nil {
+		t.Error("expected error for empty key")
+	}
+}
+
+func TestOptionValidation(t *testing.T) {
+	// Test WithNumRetries with 0 retries
+	path, err := tempfile()
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(path)
+
+	if _, err := Open(path, WithNumRetries(0)); err == nil {
+		t.Error("expected error for 0 retries")
+	}
+
+	// Test WithNumRetries with too many retries
+	if _, err := Open(path, WithNumRetries(15)); err == nil {
+		t.Error("expected error for too many retries")
+	}
+
+	// Test WithMaxCacheSize with negative size
+	if _, err := Open(path, WithMaxCacheSize(-1)); err == nil {
+		t.Error("expected error for negative cache size")
+	}
+}
+
 func tempfile() (string, error) {
 	tempFile, err := os.CreateTemp(os.TempDir(), "store_test")
 	if err != nil {
