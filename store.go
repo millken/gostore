@@ -129,10 +129,12 @@ func WithReadOnly() Option {
 
 // Store is KVStore implementation based bolt DB
 type Store struct {
-	opt   *option
-	db    *bolt.DB
-	lru   *lru
-	group singleflight.Group
+	opt         *option
+	db          *bolt.DB
+	lru         *lru
+	group       singleflight.Group
+	tempFile    string // for memory stores
+	isMemory    bool   // flag to indicate memory store
 }
 
 // Open opens a store with the given config
@@ -164,15 +166,16 @@ func Open(DbPath string, opts ...Option) (*Store, error) {
 	}
 
 	return &Store{
-		db:    db,
-		opt:   &opt,
-		lru:   lru,
-		group: singleflight.Group{},
+		db:       db,
+		opt:      &opt,
+		lru:      lru,
+		group:    singleflight.Group{},
+		isMemory: false,
 	}, nil
 }
 
 // OpenMemory opens a store in memory for testing purposes
-func OpenMemory(opts ...Option) (*MemoryStore, error) {
+func OpenMemory(opts ...Option) (*Store, error) {
 	var (
 		err error
 		opt option
@@ -199,7 +202,7 @@ func OpenMemory(opts ...Option) (*MemoryStore, error) {
 	tempFilePath := tempFile.Name()
 	tempFile.Close()
 
-	// Open with options, but mark as in-memory for cleanup
+	// Open with options for memory store
 	boltOpts := bolt.DefaultOptions
 	boltOpts.ReadOnly = opt.readOnly
 	boltOpts.NoSync = true
@@ -211,36 +214,27 @@ func OpenMemory(opts ...Option) (*MemoryStore, error) {
 		return nil, err
 	}
 
-	return &MemoryStore{
-		Store: &Store{
-			db:    db,
-			opt:   &opt,
-			lru:   lru,
-			group: singleflight.Group{},
-		},
-		tempFilePath: tempFilePath,
+	return &Store{
+		db:       db,
+		opt:      &opt,
+		lru:      lru,
+		group:    singleflight.Group{},
+		tempFile: tempFilePath,
+		isMemory: true,
 	}, nil
-}
-
-// MemoryStore is a Store that cleans up temporary files on close
-type MemoryStore struct {
-	*Store
-	tempFilePath string
-}
-
-// Close closes the store and removes the temporary file
-func (m *MemoryStore) Close() error {
-	dbErr := m.Store.Close()
-	fileErr := os.Remove(m.tempFilePath)
-	if dbErr != nil {
-		return dbErr
-	}
-	return fileErr
 }
 
 // Close closes the store
 func (s *Store) Close() error {
-	return s.db.Close()
+	dbErr := s.db.Close()
+	if s.isMemory && s.tempFile != "" {
+		fileErr := os.Remove(s.tempFile)
+		if dbErr != nil {
+			return dbErr
+		}
+		return fileErr
+	}
+	return dbErr
 }
 
 // Put inserts a <key, value> record

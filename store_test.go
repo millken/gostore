@@ -499,7 +499,7 @@ func TestOptionValidation(t *testing.T) {
 }
 
 // memoryTempStore creates a memory store for testing
-func memoryTempStore(opts ...Option) (*MemoryStore, error) {
+func memoryTempStore(opts ...Option) (*Store, error) {
 	return OpenMemory(opts...)
 }
 

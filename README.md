@@ -28,6 +28,8 @@ go get github.com/millken/gostore
 
 ## Quick Start
 
+### Basic Usage
+
 ```go
 package main
 
@@ -81,12 +83,49 @@ func main() {
 }
 ```
 
+### In-Memory Store (for testing)
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    "github.com/millken/gostore"
+)
+
+func main() {
+    // Create an in-memory store for testing
+    store, err := gostore.OpenMemory(
+        gostore.WithMaxCacheSize(1000),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer store.Close() // Automatically cleans up temp files
+
+    // Use it exactly like a regular store
+    err = store.Put("test", []byte("key"), []byte("value"))
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    value, err := store.Get([]byte("test"), []byte("key"))
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("Value: %s\n", string(value))
+}
+```
+
 ## API Reference
 
 ### Opening a Store
 
 ```go
-// Basic store
+// Basic file-based store
 store, err := gostore.Open("/path/to/db")
 
 // With options
@@ -94,6 +133,12 @@ store, err := gostore.Open("/path/to/db",
     gostore.WithMaxCacheSize(1000),     // LRU cache size
     gostore.WithNumRetries(5),          // Retry attempts for DB operations
     gostore.WithReadOnly(),             // Read-only mode
+)
+
+// In-memory store for testing
+memoryStore, err := gostore.OpenMemory(
+    gostore.WithMaxCacheSize(1000),     // LRU cache size
+    gostore.WithNumRetries(3),          // Retry attempts
 )
 ```
 
