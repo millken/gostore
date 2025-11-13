@@ -9,6 +9,7 @@ import (
 )
 
 func TestOpen(t *testing.T) {
+	// Test with file-based store
 	path, err := tempfile()
 	if err != nil {
 		t.Error(err)
@@ -22,6 +23,18 @@ func TestOpen(t *testing.T) {
 	}
 
 	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with memory store
+	ms, err := OpenMemory(WithNumRetries(1))
+	if err != nil {
+		t.Fatal(err)
+	} else if ms == nil {
+		t.Fatal("expected memory db")
+	}
+
+	if err := ms.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -76,6 +89,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestOptionWithMaxCacheSize(t *testing.T) {
+	// Test with file-based store
 	path, err := tempfile()
 	if err != nil {
 		t.Error(err)
@@ -99,6 +113,27 @@ func TestOptionWithMaxCacheSize(t *testing.T) {
 	}
 	if v.Name != "value" {
 		t.Errorf("expected value %s, got %s", "value", v.Name)
+	}
+
+	// Test with memory store
+	ms, err := memoryTempStore(WithMaxCacheSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	var mv T1
+	if err := ms.Load("test", &mv); err != ErrKeyNotFound {
+		t.Errorf("expected error %s, got %s", ErrKeyNotFound, err)
+	}
+	if err := ms.Update("test", &T1{Name: "memory_value"}); err != nil {
+		t.Error(err)
+	}
+	err = ms.Load("test", &mv)
+	if err != nil {
+		t.Error(err)
+	}
+	if mv.Name != "memory_value" {
+		t.Errorf("expected value %s, got %s", "memory_value", mv.Name)
 	}
 }
 
@@ -461,6 +496,11 @@ func TestOptionValidation(t *testing.T) {
 	if _, err := Open(path, WithMaxCacheSize(-1)); err == nil {
 		t.Error("expected error for negative cache size")
 	}
+}
+
+// memoryTempStore creates a memory store for testing
+func memoryTempStore(opts ...Option) (*MemoryStore, error) {
+	return OpenMemory(opts...)
 }
 
 func tempfile() (string, error) {

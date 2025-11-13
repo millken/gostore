@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -168,6 +169,73 @@ func Open(DbPath string, opts ...Option) (*Store, error) {
 		lru:   lru,
 		group: singleflight.Group{},
 	}, nil
+}
+
+// OpenMemory opens a store in memory for testing purposes
+func OpenMemory(opts ...Option) (*MemoryStore, error) {
+	var (
+		err error
+		opt option
+		lru *lru
+	)
+
+	for _, o := range opts {
+		if err = o(&opt); err != nil {
+			return nil, err
+		}
+	}
+	if opt.numRetries == 0 {
+		opt.numRetries = _defaultNumRetries
+	}
+	if opt.maxCacheSize > 0 {
+		lru = newLRU(opt.maxCacheSize)
+	}
+
+	// Create a temporary file for in-memory database
+	tempFile, err := os.CreateTemp("", "gostore_memory_*.db")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempFilePath := tempFile.Name()
+	tempFile.Close()
+
+	// Open with options, but mark as in-memory for cleanup
+	boltOpts := bolt.DefaultOptions
+	boltOpts.ReadOnly = opt.readOnly
+	boltOpts.NoSync = true
+	boltOpts.NoFreelistSync = true
+
+	db, err := bolt.Open(tempFilePath, _fileMode, boltOpts)
+	if err != nil {
+		os.Remove(tempFilePath)
+		return nil, err
+	}
+
+	return &MemoryStore{
+		Store: &Store{
+			db:    db,
+			opt:   &opt,
+			lru:   lru,
+			group: singleflight.Group{},
+		},
+		tempFilePath: tempFilePath,
+	}, nil
+}
+
+// MemoryStore is a Store that cleans up temporary files on close
+type MemoryStore struct {
+	*Store
+	tempFilePath string
+}
+
+// Close closes the store and removes the temporary file
+func (m *MemoryStore) Close() error {
+	dbErr := m.Store.Close()
+	fileErr := os.Remove(m.tempFilePath)
+	if dbErr != nil {
+		return dbErr
+	}
+	return fileErr
 }
 
 // Close closes the store
